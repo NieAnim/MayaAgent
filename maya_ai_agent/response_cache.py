@@ -34,9 +34,30 @@ CACHE_TTL = 7 * 24 * 3600
 # Maximum number of cached entries
 MAX_CACHE_SIZE = 200
 
-# Cache file location
-_CACHE_DIR = os.path.dirname(os.path.abspath(__file__))
-_CACHE_FILE = os.path.join(_CACHE_DIR, ".response_cache.json")
+# Cache file location — use Maya's user directory instead of the package dir
+# so that the package directory stays clean and read-only deployments work.
+def _get_cache_dir():
+    """Return a writable cache directory under the user's Maya prefs."""
+    # Try Maya's user app dir first
+    try:
+        import maya.cmds as cmds
+        maya_app_dir = cmds.internalVar(userAppDir=True)
+        cache_dir = os.path.join(maya_app_dir, "maya_ai_agent")
+    except Exception:
+        # Fallback to ~/.maya_ai_agent
+        cache_dir = os.path.join(os.path.expanduser("~"), ".maya_ai_agent")
+    if not os.path.isdir(cache_dir):
+        os.makedirs(cache_dir)
+    return cache_dir
+
+_CACHE_DIR = None  # Lazy-initialized
+_CACHE_FILE = None
+
+def _ensure_cache_path():
+    global _CACHE_DIR, _CACHE_FILE
+    if _CACHE_FILE is None:
+        _CACHE_DIR = _get_cache_dir()
+        _CACHE_FILE = os.path.join(_CACHE_DIR, ".response_cache.json")
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +105,7 @@ def _load_cache():
     if _memory_cache is not None:
         return _memory_cache
 
+    _ensure_cache_path()
     if os.path.isfile(_CACHE_FILE):
         try:
             with open(_CACHE_FILE, "r", encoding="utf-8") as f:
@@ -102,6 +124,7 @@ def _save_cache():
     if _memory_cache is None:
         return
 
+    _ensure_cache_path()
     try:
         with open(_CACHE_FILE, "w", encoding="utf-8") as f:
             json.dump(_memory_cache, f, ensure_ascii=False, indent=2)
@@ -227,6 +250,7 @@ def clear_cache():
     """Clear the entire response cache."""
     global _memory_cache
     _memory_cache = {}
+    _ensure_cache_path()
     try:
         if os.path.isfile(_CACHE_FILE):
             os.remove(_CACHE_FILE)
