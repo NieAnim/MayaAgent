@@ -108,6 +108,20 @@ QPushButton#reuseBtn:hover {
     background-color: #1a8ae8;
 }
 
+QPushButton#resumeBtn {
+    background-color: #2ea043;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 5px 14px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+QPushButton#resumeBtn:hover {
+    background-color: #3fb950;
+}
+
 QTextEdit#detailView {
     background-color: #1e1e1e;
     color: #d4d4d4;
@@ -134,6 +148,7 @@ class HistoryWidget(QtWidgets.QWidget):
     """
 
     reuse_reply = Signal(str)
+    resume_session = Signal(str)  # session_id — resume full conversation
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -243,6 +258,12 @@ class HistoryWidget(QtWidgets.QWidget):
         reuse_btn.setToolTip("将选中记录的 AI 回复发送到对话中")
         reuse_btn.clicked.connect(self._on_reuse)
         bottom_layout.addWidget(reuse_btn)
+
+        resume_btn = QtWidgets.QPushButton("继续对话")
+        resume_btn.setObjectName("resumeBtn")
+        resume_btn.setToolTip("恢复选中记录所在会话的完整对话，接着继续聊")
+        resume_btn.clicked.connect(self._on_resume)
+        bottom_layout.addWidget(resume_btn)
 
         layout.addWidget(bottom_bar)
 
@@ -379,6 +400,18 @@ class HistoryWidget(QtWidgets.QWidget):
             reply = record.get("assistant_reply", "")
             if reply:
                 self.reuse_reply.emit(reply)
+
+    @Slot()
+    def _on_resume(self):
+        """Resume the full conversation of the selected record's session."""
+        current = self._tree.currentItem()
+        if current is None:
+            return
+        record = current.data(0, Qt.UserRole)
+        if record:
+            session_id = record.get("session_id", "")
+            if session_id:
+                self.resume_session.emit(session_id)
 
     @Slot()
     def _on_clear_history(self):

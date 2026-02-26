@@ -23,6 +23,7 @@ from .command_shortcut import try_shortcut, execute_shortcut
 from .history_manager import HistoryManager
 from .history_widget import HistoryWidget
 from .settings_widget import SettingsWidget
+from .markdown_renderer import render_markdown
 from . import response_cache
 from . import config
 
@@ -180,6 +181,26 @@ QPushButton#sendBtn:pressed {{
 QPushButton#sendBtn:disabled {{
     background-color: #555555;
     color: #888888;
+}}
+
+/* ---- Stop button ---- */
+QPushButton#stopBtn {{
+    background-color: #d42020;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: {btn_fs}px;
+    font-weight: bold;
+    min-height: 32px;
+}}
+
+QPushButton#stopBtn:hover {{
+    background-color: #e83838;
+}}
+
+QPushButton#stopBtn:pressed {{
+    background-color: #a01818;
 }}
 
 /* ---- Status ---- */
@@ -366,6 +387,7 @@ class ChatWidget(QtWidgets.QWidget):
         # --- Page 1: History ---
         self._history_widget = HistoryWidget()
         self._history_widget.reuse_reply.connect(self._on_reuse_history_reply)
+        self._history_widget.resume_session.connect(self._on_resume_session)
         self._page_stack.addWidget(self._history_widget)
 
         # --- Page 2: Settings ---
@@ -395,6 +417,15 @@ class ChatWidget(QtWidgets.QWidget):
         title = QtWidgets.QLabel("Maya AI Agent")
         title.setObjectName("panelTitle")
         top_layout.addWidget(title)
+
+        # Token usage mini label in top bar
+        self._token_label = QtWidgets.QLabel("")
+        self._token_label.setStyleSheet(
+            "color: #4ec9b0; font-size: 11px; padding: 0 6px;"
+        )
+        self._token_label.setAlignment(Qt.AlignCenter)
+        top_layout.addWidget(self._token_label)
+
         top_layout.addStretch()
 
         # Font size controls
@@ -459,6 +490,13 @@ class ChatWidget(QtWidgets.QWidget):
         self.send_btn.clicked.connect(self._on_send)
         input_layout.addWidget(self.send_btn, alignment=Qt.AlignBottom)
 
+        self.stop_btn = QtWidgets.QPushButton("停止")
+        self.stop_btn.setObjectName("stopBtn")
+        self.stop_btn.setToolTip("停止生成")
+        self.stop_btn.clicked.connect(self._on_stop)
+        self.stop_btn.setVisible(False)
+        input_layout.addWidget(self.stop_btn, alignment=Qt.AlignBottom)
+
         layout.addWidget(input_container)
 
         return page
@@ -501,6 +539,12 @@ class ChatWidget(QtWidgets.QWidget):
         else:
             label = "ℹ 系统"; color = "#888888"; bg = "#252525"
 
+        # Render content: Markdown for assistant, plain escaped HTML for others
+        if role == "assistant":
+            rendered_text = render_markdown(text)
+        else:
+            rendered_text = self._escape_html(text)
+
         # NOTE: Do NOT set font-size in inline HTML styles.
         # Font size is controlled by chat_history.document().setDefaultFont()
         # so that A+/A- changes affect ALL messages (existing + new) instantly.
@@ -509,12 +553,12 @@ class ChatWidget(QtWidgets.QWidget):
             'background-color: {bg}; border-radius: 8px; border-left: 3px solid {color};">'
             '<span style="color:{color}; font-weight:bold;">{label}</span>'
             '  <span style="color:#555; font-size:small;">{time}</span>'
-            '<div style="color:#d4d4d4; white-space: pre-wrap; '
+            '<div style="color:#d4d4d4; '
             'margin-top: 4px; line-height: 1.5;">{text}</div>'
             '</div>'
         ).format(
             color=color, bg=bg, label=label, time=timestamp,
-            text=self._escape_html(text),
+            text=rendered_text,
         )
         self.chat_history.append(html)
         scrollbar = self.chat_history.verticalScrollBar()
@@ -529,6 +573,28 @@ class ChatWidget(QtWidgets.QWidget):
                 .replace("\n", "<br/>")
         )
 
+    def _append_reasoning(self, reasoning_text):
+        """Append a collapsible reasoning/thinking block (DeepSeek-Reasoner)."""
+        escaped = self._escape_html(reasoning_text)
+        # QTextEdit doesn't support <details>/<summary>, so we use a styled div
+        # with a smaller font and muted color to visually separate it.
+        html = (
+            '<div style="margin: 2px 0 4px 0; padding: 6px 12px; '
+            'background-color: #1a1a2e; border-radius: 6px; '
+            'border-left: 3px solid #6a5acd;">'
+            '<span style="color:#6a5acd; font-weight:bold; font-size:small;">'
+            '💭 思维链 (Reasoning)</span>'
+            '<div style="color:#8888aa; font-size:small; '
+            'margin-top: 4px; line-height: 1.4;">{text}</div>'
+            '</div>'
+        ).format(text=escaped)
+        cursor = self.chat_history.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.End)
+        self.chat_history.setTextCursor(cursor)
+        self.chat_history.append(html)
+        scrollbar = self.chat_history.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
     # ----- Thinking Animation -----------------------------------------------
 
     def _animate_thinking(self):
@@ -538,6 +604,8 @@ class ChatWidget(QtWidgets.QWidget):
 
     def _set_busy(self, busy):
         self.send_btn.setEnabled(not busy)
+        self.send_btn.setVisible(not busy)
+        self.stop_btn.setVisible(busy)
         self.chat_input.setEnabled(not busy)
         if busy:
             self._thinking_dots = 0
@@ -655,6 +723,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._worker.tool_calls_received.connect(self._on_tool_calls)
         self._worker.error_occurred.connect(self._on_error)
         self._worker.status_changed.connect(self._on_status)
+        self._worker.usage_received.connect(self._on_usage)
         self._worker.finished.connect(self._on_worker_done)
         self._worker.start()
 
@@ -662,32 +731,63 @@ class ChatWidget(QtWidgets.QWidget):
 
     @Slot(str)
     def _on_response_chunk(self, chunk_text):
-        """Handle a streaming text chunk — update the chat display incrementally."""
+        """Handle a streaming text chunk — append text directly for performance."""
         if not self._streaming_active:
-            # First chunk: create a new assistant message bubble
+            # First chunk: create the message bubble header, then insert text
             self._streaming_active = True
             self._streaming_content = chunk_text
-            # Record the block count *before* appending so we know where to
-            # truncate on subsequent chunks.  Block count is far more reliable
-            # than character positions when dealing with rich-text / HTML.
+
+            timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+            header_html = (
+                '<div style="margin: 4px 0; padding: 8px 12px; '
+                'background-color: #1a2e1a; border-radius: 8px; '
+                'border-left: 3px solid #4ec9b0;">'
+                '<span style="color:#4ec9b0; font-weight:bold;">\U0001f916 AI</span>'
+                '  <span style="color:#555; font-size:small;">{time}</span>'
+                '<div id="stream-content" style="color:#d4d4d4; '
+                'margin-top: 4px; line-height: 1.5;">'
+            ).format(time=timestamp)
+
+            # Record block count before appending so _finalize_stream knows where to trim
             self._stream_block_start = self.chat_history.document().blockCount()
-            self._append_message("assistant", chunk_text)
-        else:
-            # Subsequent chunks: remove the previous bubble and re-append
-            self._streaming_content += chunk_text
-            doc = self.chat_history.document()
-            cursor = QtGui.QTextCursor(doc)
-            # Select from the start-block to the very end of the document
-            start_block = doc.findBlockByNumber(max(self._stream_block_start - 1, 0))
-            cursor.setPosition(start_block.position())
-            cursor.movePosition(QtGui.QTextCursor.End, QtGui.QTextCursor.KeepAnchor)
-            cursor.removeSelectedText()
-            # Also remove the trailing empty block left behind
-            if not cursor.atStart():
-                cursor.deletePreviousChar()
+
+            cursor = self.chat_history.textCursor()
+            cursor.movePosition(QtGui.QTextCursor.End)
             self.chat_history.setTextCursor(cursor)
-            # Re-append with full accumulated content
-            self._append_message("assistant", self._streaming_content)
+            self.chat_history.append(header_html)
+
+            # Append raw text
+            cursor = self.chat_history.textCursor()
+            cursor.movePosition(QtGui.QTextCursor.End)
+            cursor.insertText(chunk_text)
+            self.chat_history.setTextCursor(cursor)
+        else:
+            # Subsequent chunks: just append text at the end (no re-render)
+            self._streaming_content += chunk_text
+            cursor = self.chat_history.textCursor()
+            cursor.movePosition(QtGui.QTextCursor.End)
+            cursor.insertText(chunk_text)
+            self.chat_history.setTextCursor(cursor)
+
+        scrollbar = self.chat_history.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    def _finalize_stream(self, final_text):
+        """Replace the raw streamed plain-text with a Markdown-rendered version."""
+        # Clear the streaming bubble and re-render as a proper assistant message
+        doc = self.chat_history.document()
+        # We recorded _stream_block_start earlier; find that position
+        start_block_num = max(getattr(self, '_stream_block_start', doc.blockCount()) - 1, 0)
+        start_block = doc.findBlockByNumber(start_block_num)
+        cursor = QtGui.QTextCursor(doc)
+        cursor.setPosition(start_block.position())
+        cursor.movePosition(QtGui.QTextCursor.End, QtGui.QTextCursor.KeepAnchor)
+        cursor.removeSelectedText()
+        if not cursor.atStart():
+            cursor.deletePreviousChar()
+        self.chat_history.setTextCursor(cursor)
+        # Re-append with full Markdown rendering
+        self._append_message("assistant", final_text)
 
     @Slot(str)
     def _on_response(self, response_json):
@@ -702,27 +802,16 @@ class ChatWidget(QtWidgets.QWidget):
             reasoning_content = ""
 
         if text:
-            # If streaming was active, content is already displayed
-            # Just finalize the message (streaming may have partial content)
             if self._streaming_active:
-                # If streamed content differs from final (shouldn't happen normally),
-                # update with final version
-                if text != self._streaming_content:
-                    doc = self.chat_history.document()
-                    cursor = QtGui.QTextCursor(doc)
-                    start_block = doc.findBlockByNumber(
-                        max(getattr(self, '_stream_block_start', doc.blockCount()) - 1, 0))
-                    cursor.setPosition(start_block.position())
-                    cursor.movePosition(QtGui.QTextCursor.End, QtGui.QTextCursor.KeepAnchor)
-                    cursor.removeSelectedText()
-                    if not cursor.atStart():
-                        cursor.deletePreviousChar()
-                    self.chat_history.setTextCursor(cursor)
-                    self._append_message("assistant", text)
+                self._finalize_stream(text)
                 self._streaming_active = False
                 self._streaming_content = ""
             else:
                 self._append_message("assistant", text)
+
+            # Display reasoning chain (DeepSeek-Reasoner / R1) as a collapsible block
+            if reasoning_content:
+                self._append_reasoning(reasoning_content)
 
             assistant_msg = {"role": "assistant", "content": text}
             # Preserve reasoning_content for DeepSeek-Reasoner (R1)
@@ -851,7 +940,11 @@ class ChatWidget(QtWidgets.QWidget):
             self._set_busy(False)
             return
 
-        self._start_llm_request(force_text_only=True)
+        # Allow the LLM to call more tools in subsequent rounds
+        # (e.g. "query scene → then create controllers").
+        # Only force text-only on the very last allowed round as a safety net.
+        force_text = (self._tool_round >= MAX_TOOL_ROUNDS - 1)
+        self._start_llm_request(force_text_only=force_text)
 
     @Slot(str)
     def _on_tool_exec_error(self, error_text):
@@ -866,11 +959,53 @@ class ChatWidget(QtWidgets.QWidget):
         if status == "idle":
             self.status_label.setText("")
 
+    @Slot(str)
+    def _on_usage(self, usage_json):
+        """Display token usage in top bar and settings page."""
+        try:
+            usage = json.loads(usage_json)
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
+            self._session_tokens = getattr(self, "_session_tokens", 0) + total_tokens
+
+            # Update top bar mini label
+            self._token_label.setText(
+                "T:{} (累计:{})".format(total_tokens, self._session_tokens)
+            )
+
+            # Update settings page usage panel
+            if hasattr(self, '_settings_widget'):
+                self._settings_widget.update_usage(
+                    prompt_tokens, completion_tokens, total_tokens,
+                    self._session_tokens
+                )
+        except (json.JSONDecodeError, TypeError):
+            pass
+
     @Slot()
     def _on_worker_done(self):
         if not self._expected_tool_ids:
             self._set_busy(False)
         self._worker = None
+
+    @Slot()
+    def _on_stop(self):
+        """Stop the current LLM generation."""
+        if self._worker is not None:
+            self._worker.cancel()
+        # If streaming was active, finalise whatever content we have so far
+        if self._streaming_active and self._streaming_content:
+            self._conversation.append({
+                "role": "assistant",
+                "content": self._streaming_content,
+            })
+            self._streaming_active = False
+            self._streaming_content = ""
+        self._expected_tool_ids = []
+        self._pending_tool_results.clear()
+        self._set_busy(False)
+        self._append_message("system", "已停止生成。")
 
     @Slot()
     def _on_clear(self):
@@ -886,6 +1021,10 @@ class ChatWidget(QtWidgets.QWidget):
         self._streaming_active = False
         self._streaming_content = ""
         self._stream_block_start = 0
+        self._session_tokens = 0
+        self._token_label.setText("")
+        if hasattr(self, '_settings_widget'):
+            self._settings_widget.reset_usage()
         ConfirmDialog.reset_auto_approve()
         invalidate_prompt_cache()
 
@@ -894,4 +1033,43 @@ class ChatWidget(QtWidgets.QWidget):
         self._append_message("assistant", reply_text)
         self._append_message("system", "（复用历史回复）")
         self._conversation.append({"role": "assistant", "content": reply_text})
+        self._switch_tab(TAB_CHAT)
+
+    @Slot(str)
+    def _on_resume_session(self, session_id):
+        """Restore a full historical session into the chat so the user can continue."""
+        records = self._history.get_session_records(session_id)
+        if not records:
+            self._append_message("system", "未找到该会话的记录。")
+            self._switch_tab(TAB_CHAT)
+            return
+
+        # Clear current conversation first
+        self._conversation.clear()
+        self.chat_history.clear()
+        self.status_label.setText("")
+        self._tool_round = 0
+        self._streaming_active = False
+        self._streaming_content = ""
+
+        # Rebuild conversation from history records
+        for r in records:
+            user_input = r.get("user_input", "")
+            assistant_reply = r.get("assistant_reply", "")
+            tools_used = r.get("tools_used") or []
+
+            if user_input:
+                self._append_message("user", user_input)
+                self._conversation.append({"role": "user", "content": user_input})
+
+            if tools_used:
+                self._append_message("tool", "使用工具: {}".format(", ".join(tools_used)))
+
+            if assistant_reply:
+                self._append_message("assistant", assistant_reply)
+                self._conversation.append({"role": "assistant", "content": assistant_reply})
+
+        self._append_message("system",
+            "已恢复历史会话 ({} 条记录)，可以继续对话。".format(len(records))
+        )
         self._switch_tab(TAB_CHAT)
