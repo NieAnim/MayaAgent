@@ -658,7 +658,11 @@ class ChatWidget(QtWidgets.QWidget):
         # --- Layer 3: Full LLM request ---
         api_key = config.get("OPENAI_API_KEY", "")
         if not api_key or api_key == "your_api_key_here":
-            self._append_message("system", "请先点击左侧「⚙ 设置」配置你的 API Key。")
+            self._append_message(
+                "system",
+                "尚未配置 API Key，请点击左侧「⚙ 设置」选择服务商并填写 API Key。"
+            )
+            self._switch_tab(TAB_SETTINGS)
             return
 
         self._last_user_query = text

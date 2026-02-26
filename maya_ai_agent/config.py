@@ -10,13 +10,37 @@ import os
 _CONFIG_CACHE = {}
 
 
+_DEFAULT_CONFIG = {
+    "OPENAI_API_KEY": "",
+    "OPENAI_API_BASE": "https://api.openai.com/v1",
+    "OPENAI_MODEL": "gpt-4o",
+    "OPENAI_MAX_TOKENS": "4096",
+    "UI_FONT_SIZE": "13",
+}
+
+
 def _find_env_file():
-    """Locate the .env file relative to this package."""
+    """Locate the .env file relative to this package.
+
+    If the file does not exist yet, create one with safe defaults so
+    the user can configure everything from inside Maya's settings panel
+    without manually editing files.
+    """
     package_dir = os.path.dirname(os.path.abspath(__file__))
     env_path = os.path.join(package_dir, ".env")
     if os.path.isfile(env_path):
         return env_path
-    return None
+
+    # Auto-create a default .env so the plugin can be loaded directly
+    try:
+        lines = ["# Maya AI Agent Configuration\n"]
+        for key, value in _DEFAULT_CONFIG.items():
+            lines.append("{}={}\n".format(key, value))
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+        return env_path
+    except OSError:
+        return None
 
 
 def _parse_env_file(filepath):

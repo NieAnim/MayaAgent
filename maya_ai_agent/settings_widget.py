@@ -451,11 +451,6 @@ class SettingsWidget(QtWidgets.QWidget):
         model = self.model_edit.text().strip()
         max_tokens = self.max_tokens_spin.value()
 
-        if not api_key:
-            self._status_msg.setStyleSheet("color: #f44747; font-size: 12px;")
-            self._status_msg.setText("请填写 API Key")
-            return
-
         if not api_base:
             api_base = "https://api.openai.com/v1"
         if not model:
@@ -469,8 +464,12 @@ class SettingsWidget(QtWidgets.QWidget):
         }
         config.save_config(data)
 
-        self._status_msg.setStyleSheet("color: #4ec9b0; font-size: 12px;")
-        self._status_msg.setText("✓ 已保存")
+        if not api_key:
+            self._status_msg.setStyleSheet("color: #dcdcaa; font-size: 12px;")
+            self._status_msg.setText("✓ 已保存（API Key 为空，对话前请填写）")
+        else:
+            self._status_msg.setStyleSheet("color: #4ec9b0; font-size: 12px;")
+            self._status_msg.setText("✓ 已保存")
 
         # Auto-clear status after 3s
         QtCore.QTimer.singleShot(3000, lambda: self._status_msg.setText(""))
