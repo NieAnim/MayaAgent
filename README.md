@@ -121,24 +121,7 @@ These bypass the LLM entirely for instant execution:
 
 ## Setup
 
-### 1. Configure API Key
-
-```bash
-# Copy the example config
-cp maya_ai_agent/.env.example maya_ai_agent/.env
-```
-
-Edit `.env` with your API key:
-
-```env
-OPENAI_API_KEY=your_api_key_here
-OPENAI_API_BASE=https://api.openai.com/v1
-OPENAI_MODEL=gpt-4o
-OPENAI_MAX_TOKENS=4096
-UI_FONT_SIZE=13
-```
-
-### 2. Add to Maya
+### 1. Load into Maya
 
 Make sure the project directory is in Maya's Python path, then run in **Script Editor (Python)**:
 
@@ -152,9 +135,17 @@ launch()
 
 Or add to a shelf button for one-click access.
 
-### 3. Optional: Switch Provider
+### 2. Configure API Key (inside Maya)
 
-Open Settings (gear icon) → select a provider preset → click **Test Connection** to verify.
+On first launch, the plugin will **auto-create** a default `.env` config file — no need to manually copy or edit any files.
+
+1. The chat panel will prompt you to configure settings and **auto-switch to the Settings page**
+2. Select a **provider preset** (DeepSeek / Gemini / OpenAI / Ollama / OpenRouter / ...)
+3. Click **Apply** to fill in Base URL and Model
+4. Enter your **API Key**
+5. Click **Test Connection** to verify → then **Save**
+
+> You can also manually edit `maya_ai_agent/.env` if preferred.
 
 ---
 
@@ -214,6 +205,7 @@ maya_ai_agent/
 - Top bar mini token label with live usage display
 - **Continue Conversation** button in history to restore full session context
 - Resumed sessions maintain complete LLM conversation history
+- **In-Maya setup**: auto-create `.env` on first launch, configure API Key directly in Settings page (no manual file editing needed)
 
 ### v1.2.0 — Streaming & Quality of Life
 - Streaming output optimization (no flickering, smooth append)
