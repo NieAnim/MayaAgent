@@ -3,16 +3,19 @@
 Tools package - Auto-imports all tool modules to register them.
 """
 
+import logging
 import traceback
+
+log = logging.getLogger("MayaAIAgent.tools")
 
 
 def _safe_import(module_name):
-    """Safely import a tool module, printing errors instead of crashing."""
+    """Safely import a tool module, logging errors instead of crashing."""
     try:
         __import__(module_name, globals(), locals(), ["*"])
     except Exception as e:
-        print("[MayaAIAgent] WARNING: Failed to import {}: {}".format(module_name, e))
-        traceback.print_exc()
+        log.warning("Failed to import %s: %s", module_name, e)
+        log.debug(traceback.format_exc())
 
 
 # Import all tool modules so their @tool decorators execute and register
