@@ -10,7 +10,7 @@ An AI-powered assistant panel for Autodesk Maya, integrating LLM with Function C
 
 ### Core Architecture
 - **Three-layer response strategy**: Command Shortcuts → Response Cache → LLM API
-- **26 built-in tools** across 7 categories with `@tool` decorator auto-registration
+- **26 built-in tools** across 7 categories + **1 vision tool** with `@tool` decorator auto-registration
 - **`execute_python_code`** universal fallback — any Maya operation the AI can imagine
 - **Prompt Caching optimization** — static system prompt + dynamic context separation maximizes API cache hit rate
 - **Sliding window context** — keeps last 10 conversation rounds without breaking tool call sequences
@@ -23,16 +23,18 @@ An AI-powered assistant panel for Autodesk Maya, integrating LLM with Function C
 - Confirmation dialog before executing any Maya operation
 - Stop generation button for long responses
 
-### Multi-Provider Support
-| Provider | Default Model |
-|----------|---------------|
-| OpenAI | `gpt-4o` |
-| DeepSeek | `deepseek-chat` |
-| Google Gemini | `gemini-2.5-flash` |
-| Anthropic Claude | `claude-sonnet-4-20250514` |
-| Ollama (Local) | `qwen2.5:14b` |
-| OpenRouter | `deepseek/deepseek-chat` |
-| Custom | Any OpenAI-compatible endpoint |
+### Multi-Provider Support (with per-provider memory)
+| Provider | Default Model | Available Models |
+|----------|---------------|-----------------|
+| OpenAI | `gpt-4o` | gpt-4o, gpt-4o-mini, gpt-4.1, gpt-4.1-mini, gpt-4.1-nano, o3-mini, o4-mini |
+| Google Gemini | `gemini-2.5-flash` | gemini-2.5-flash, gemini-2.5-pro, gemini-2.0-flash, gemini-2.0-flash-lite |
+| DeepSeek | `deepseek-chat` | deepseek-chat, deepseek-reasoner |
+| Anthropic Claude | `claude-sonnet-4-20250514` | claude-sonnet-4, claude-opus-4, claude-3.5-sonnet |
+| OpenRouter | `deepseek/deepseek-chat` | Multi-provider aggregator (all models) |
+| Ollama (Local) | `qwen2.5:14b` | Depends on locally pulled models |
+| Custom | — | Any OpenAI-compatible endpoint |
+
+Each provider **independently remembers** its API Key, model selection, and settings — switching providers instantly restores previous configuration.
 
 ### Token & History Management
 - **Token usage tracking**: per-request / per-session / all-time total (persistent)
@@ -98,6 +100,11 @@ An AI-powered assistant panel for Autodesk Maya, integrating LLM with Function C
 |------|-------------|
 | `execute_python_code` | Execute arbitrary Python in Maya (with safety checks) |
 
+### Vision (1)
+| Tool | Description |
+|------|-------------|
+| `capture_viewport` | Capture Maya viewport screenshot for AI visual analysis (with geometric body completeness analysis) |
+
 ---
 
 ## Command Shortcuts (Zero-latency)
@@ -140,10 +147,11 @@ Or add to a shelf button for one-click access.
 On first launch, the plugin will **auto-create** a default `.env` config file — no need to manually copy or edit any files.
 
 1. The chat panel will prompt you to configure settings and **auto-switch to the Settings page**
-2. Select a **provider preset** (DeepSeek / Gemini / OpenAI / Ollama / OpenRouter / ...)
-3. Click **Apply** to fill in Base URL and Model
+2. Select a **provider** from the dropdown (OpenAI / Gemini / DeepSeek / Claude / ...)
+3. Base URL and model list are **automatically filled** — pick a model from the preset dropdown or type a custom name
 4. Enter your **API Key**
 5. Click **Test Connection** to verify → then **Save**
+6. Switching providers **automatically restores** previously saved API Key and model
 
 > You can also manually edit `maya_ai_agent/.env` if preferred.
 
@@ -193,12 +201,24 @@ maya_ai_agent/
     ├── workflow_tools.py    # Naming, QA, batch operations
     ├── export_tools.py      # FBX import/export
     ├── mocap_tools.py       # Motion capture processing
+    ├── vision_tool.py       # Viewport capture & geometric analysis
     └── execute_code_tool.py # Arbitrary Python execution
 ```
 
 ---
 
 ## Changelog
+
+### v1.4.0 — Vision Tool & Smart Provider Settings
+- **Viewport Vision Tool**: capture Maya viewport screenshot for AI visual analysis
+  - Geometric body completeness analysis (vertex sampling to detect missing head/feet/etc.)
+  - Scene metadata injection with definitive conclusions (bounding box, region distribution)
+  - Configurable resolution (default 1280×720) with `high` detail mode
+- **Smart Provider Settings**: switching providers auto-syncs Base URL and model list
+  - **Per-provider memory**: each provider independently remembers API Key, model, and max tokens
+  - **Model preset dropdown**: editable ComboBox with recommended models + custom input
+  - No more manual "Apply" button — select provider and everything fills in automatically
+- Enhanced prompt rules: geometry analysis conclusions override visual observations (Rule 0)
 
 ### v1.3.0 — Token Tracking & History Resume
 - Token usage panel in Settings (current / session / all-time persistent total)

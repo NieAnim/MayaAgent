@@ -16,6 +16,9 @@ _DEFAULT_CONFIG = {
     "OPENAI_MODEL": "gpt-4o",
     "OPENAI_MAX_TOKENS": "4096",
     "UI_FONT_SIZE": "13",
+    "VISION_WIDTH": "1280",
+    "VISION_HEIGHT": "720",
+    "VISION_DETAIL": "high",
 }
 
 

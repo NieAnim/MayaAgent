@@ -12,80 +12,84 @@ from urllib import request as urllib_request
 from urllib.error import URLError, HTTPError
 
 # ---------------------------------------------------------------------------
-# Provider Presets
+# Provider Presets  (each provider now carries a list of recommended models)
 # ---------------------------------------------------------------------------
 
 PRESETS = [
     {
-        "name": "自定义 (Custom)",
-        "api_base": "",
-        "model": "",
-        "placeholder_key": "your-api-key",
-        "hint": "手动填写所有字段。",
-    },
-    {
-        "name": "DeepSeek",
-        "api_base": "https://api.deepseek.com/v1",
-        "model": "deepseek-chat",
+        "name": "OpenAI",
+        "api_base": "https://api.openai.com/v1",
+        "models": ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini",
+                    "gpt-4.1-nano", "o3-mini", "o4-mini"],
+        "default_model": "gpt-4o",
         "placeholder_key": "sk-...",
-        "hint": (
-            "获取 Key：https://platform.deepseek.com/api_keys\n"
-            "可用模型：deepseek-chat（V3）、deepseek-reasoner（R1）"
-        ),
+        "hint": "获取 Key：https://platform.openai.com/api-keys",
     },
     {
         "name": "Google Gemini",
         "api_base": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "model": "gemini-2.5-flash",
+        "models": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash",
+                    "gemini-2.0-flash-lite"],
+        "default_model": "gemini-2.5-flash",
         "placeholder_key": "AIza...",
         "hint": (
             "获取 Key：https://aistudio.google.com/apikey\n"
-            "可用模型：gemini-2.5-pro、gemini-2.5-flash、gemini-2.0-flash\n"
             "Gemini 提供 OpenAI 兼容接口，直接使用即可。"
+        ),
+    },
+    {
+        "name": "DeepSeek",
+        "api_base": "https://api.deepseek.com/v1",
+        "models": ["deepseek-chat", "deepseek-reasoner"],
+        "default_model": "deepseek-chat",
+        "placeholder_key": "sk-...",
+        "hint": (
+            "获取 Key：https://platform.deepseek.com/api_keys\n"
+            "⚠ DeepSeek 模型不支持视觉/图片输入。"
         ),
     },
     {
         "name": "Anthropic Claude",
         "api_base": "https://api.anthropic.com/v1",
-        "model": "claude-sonnet-4-20250514",
+        "models": ["claude-sonnet-4-20250514", "claude-opus-4-20250514",
+                    "claude-3.5-sonnet-20241022"],
+        "default_model": "claude-sonnet-4-20250514",
         "placeholder_key": "sk-ant-...",
         "hint": (
             "获取 Key：https://console.anthropic.com/settings/keys\n"
-            "可用模型：claude-sonnet-4-20250514、claude-opus-4-20250514\n"
-            "⚠ 注意：Claude 原生 API 格式与 OpenAI 不同，\n"
+            "⚠ Claude 原生 API 与 OpenAI 不同，\n"
             "如需使用请配合 OpenAI 兼容代理（如 LiteLLM / one-api）。"
-        ),
-    },
-    {
-        "name": "OpenAI",
-        "api_base": "https://api.openai.com/v1",
-        "model": "gpt-4o",
-        "placeholder_key": "sk-...",
-        "hint": (
-            "获取 Key：https://platform.openai.com/api-keys\n"
-            "可用模型：gpt-4o、gpt-4o-mini、o3-mini"
-        ),
-    },
-    {
-        "name": "Ollama (本地)",
-        "api_base": "http://localhost:11434/v1",
-        "model": "qwen2.5:14b",
-        "placeholder_key": "ollama",
-        "hint": (
-            "Ollama 本地部署，无需 API Key（填任意值即可）。\n"
-            "先运行: ollama run qwen2.5:14b\n"
-            "可用模型取决于你本地拉取了哪些。"
         ),
     },
     {
         "name": "OpenRouter",
         "api_base": "https://openrouter.ai/api/v1",
-        "model": "deepseek/deepseek-chat",
+        "models": ["deepseek/deepseek-chat", "google/gemini-2.5-flash",
+                    "anthropic/claude-sonnet-4", "openai/gpt-4o",
+                    "meta-llama/llama-4-maverick"],
+        "default_model": "deepseek/deepseek-chat",
         "placeholder_key": "sk-or-...",
+        "hint": "获取 Key：https://openrouter.ai/keys\n聚合平台，可访问几乎所有模型。",
+    },
+    {
+        "name": "Ollama (本地)",
+        "api_base": "http://localhost:11434/v1",
+        "models": ["qwen2.5:14b", "qwen2.5:7b", "llama3.1:8b",
+                    "gemma2:9b", "llava:13b"],
+        "default_model": "qwen2.5:14b",
+        "placeholder_key": "ollama",
         "hint": (
-            "获取 Key：https://openrouter.ai/keys\n"
-            "聚合平台，可访问几乎所有主流模型。"
+            "Ollama 本地部署，无需 API Key（填任意值即可）。\n"
+            "可用模型取决于你本地 ollama 拉取了哪些。"
         ),
+    },
+    {
+        "name": "自定义 (Custom)",
+        "api_base": "",
+        "models": [],
+        "default_model": "",
+        "placeholder_key": "your-api-key",
+        "hint": "手动填写所有字段。支持任何 OpenAI 兼容 API。",
     },
 ]
 
@@ -242,14 +246,61 @@ QLabel#statusMsg {
 
 
 class SettingsWidget(QtWidgets.QWidget):
-    """Inline settings panel that replaces the modal dialog."""
+    """Inline settings panel with per-provider memory and model presets."""
+
+    # Config key prefix for per-provider storage, e.g. PROVIDER_OpenAI_API_KEY
+    _PROVIDER_KEY_PREFIX = "PROVIDER_"
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("SettingsPanel")
         self.setStyleSheet(_SETTINGS_STYLE)
+        self._switching_provider = False  # guard to prevent save-on-switch loops
         self._build_ui()
         self._load_current()
+
+    # =====================================================================
+    #  Per-provider config helpers
+    # =====================================================================
+
+    @staticmethod
+    def _provider_config_key(provider_name, field):
+        """Return the .env key for a per-provider setting.
+
+        Example: _provider_config_key("Google Gemini", "API_KEY")
+                 -> "PROVIDER_Google_Gemini_API_KEY"
+        """
+        safe_name = provider_name.replace(" ", "_").replace("(", "").replace(")", "")
+        return "PROVIDER_{}_{}".format(safe_name, field)
+
+    def _save_provider_config(self, provider_name, api_key, model, max_tokens):
+        """Persist settings for a specific provider."""
+        data = {
+            self._provider_config_key(provider_name, "API_KEY"): api_key,
+            self._provider_config_key(provider_name, "MODEL"): model,
+            self._provider_config_key(provider_name, "MAX_TOKENS"): str(max_tokens),
+        }
+        config.save_config(data)
+
+    def _load_provider_config(self, provider_name):
+        """Load saved settings for a specific provider. Returns dict or None."""
+        cfg = config.load_config(force_reload=False)
+        key_key = self._provider_config_key(provider_name, "API_KEY")
+        model_key = self._provider_config_key(provider_name, "MODEL")
+        tokens_key = self._provider_config_key(provider_name, "MAX_TOKENS")
+
+        # Only return if at least the api_key was ever saved for this provider
+        if key_key in cfg or model_key in cfg:
+            return {
+                "api_key": cfg.get(key_key, ""),
+                "model": cfg.get(model_key, ""),
+                "max_tokens": cfg.get(tokens_key, "4096"),
+            }
+        return None
+
+    # =====================================================================
+    #  UI Build
+    # =====================================================================
 
     def _build_ui(self):
         scroll = QtWidgets.QScrollArea()
@@ -264,35 +315,31 @@ class SettingsWidget(QtWidgets.QWidget):
 
         # --- Title ---
         title = QtWidgets.QLabel("设置")
-        title.setStyleSheet("color: #cccccc; font-size: 16px; font-weight: bold; padding-bottom: 4px;")
+        title.setStyleSheet(
+            "color: #cccccc; font-size: 16px; font-weight: bold; padding-bottom: 4px;"
+        )
         layout.addWidget(title)
 
-        # --- Preset Group ---
-        preset_group = QtWidgets.QGroupBox("快速预设")
-        preset_layout = QtWidgets.QVBoxLayout(preset_group)
-        preset_layout.setSpacing(8)
+        # --- Provider Group ---
+        provider_group = QtWidgets.QGroupBox("服务商")
+        provider_layout = QtWidgets.QVBoxLayout(provider_group)
+        provider_layout.setSpacing(8)
 
         row = QtWidgets.QHBoxLayout()
         row.addWidget(QtWidgets.QLabel("服务商:"))
         self.preset_combo = QtWidgets.QComboBox()
         for p in PRESETS:
             self.preset_combo.addItem(p["name"])
-        self.preset_combo.currentIndexChanged.connect(self._on_preset_changed)
         row.addWidget(self.preset_combo, stretch=1)
-
-        apply_btn = QtWidgets.QPushButton("应用")
-        apply_btn.setObjectName("applyPresetBtn")
-        apply_btn.clicked.connect(self._apply_preset)
-        row.addWidget(apply_btn)
-        preset_layout.addLayout(row)
+        provider_layout.addLayout(row)
 
         self.hint_label = QtWidgets.QLabel("")
         self.hint_label.setObjectName("hintLabel")
         self.hint_label.setWordWrap(True)
         self.hint_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        preset_layout.addWidget(self.hint_label)
+        provider_layout.addWidget(self.hint_label)
 
-        layout.addWidget(preset_group)
+        layout.addWidget(provider_group)
 
         # --- API Config Group ---
         api_group = QtWidgets.QGroupBox("API 配置")
@@ -309,9 +356,12 @@ class SettingsWidget(QtWidgets.QWidget):
         self.api_base_edit.setPlaceholderText("https://api.openai.com/v1")
         api_layout.addRow("Base URL:", self.api_base_edit)
 
-        self.model_edit = QtWidgets.QLineEdit()
-        self.model_edit.setPlaceholderText("gpt-4o")
-        api_layout.addRow("模型名称:", self.model_edit)
+        # Model: editable combo box (presets + custom input)
+        self.model_combo = QtWidgets.QComboBox()
+        self.model_combo.setEditable(True)
+        self.model_combo.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
+        self.model_combo.lineEdit().setPlaceholderText("选择或输入模型名称")
+        api_layout.addRow("模型名称:", self.model_combo)
 
         self.max_tokens_spin = QtWidgets.QSpinBox()
         self.max_tokens_spin.setRange(256, 128000)
@@ -331,22 +381,22 @@ class SettingsWidget(QtWidgets.QWidget):
         usage_layout = QtWidgets.QVBoxLayout(usage_group)
         usage_layout.setSpacing(6)
 
-        # Current round
         self._usage_current_label = QtWidgets.QLabel("本次请求: —")
         self._usage_current_label.setStyleSheet("color: #d4d4d4; font-size: 12px;")
         usage_layout.addWidget(self._usage_current_label)
 
-        # Session total
         self._usage_session_label = QtWidgets.QLabel("本轮累计: 0")
-        self._usage_session_label.setStyleSheet("color: #4ec9b0; font-size: 13px; font-weight: bold;")
+        self._usage_session_label.setStyleSheet(
+            "color: #4ec9b0; font-size: 13px; font-weight: bold;"
+        )
         usage_layout.addWidget(self._usage_session_label)
 
-        # All-time total (persisted)
         self._usage_alltime_label = QtWidgets.QLabel("历史总计: 0")
-        self._usage_alltime_label.setStyleSheet("color: #dcdcaa; font-size: 13px; font-weight: bold;")
+        self._usage_alltime_label.setStyleSheet(
+            "color: #dcdcaa; font-size: 13px; font-weight: bold;"
+        )
         usage_layout.addWidget(self._usage_alltime_label)
 
-        # Breakdown bar
         self._usage_detail_label = QtWidgets.QLabel(
             "Prompt: — | Completion: — | Total: —"
         )
@@ -389,56 +439,138 @@ class SettingsWidget(QtWidgets.QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
 
-        self._on_preset_changed(0)
+        # Connect provider switch AFTER building all widgets
+        self.preset_combo.currentIndexChanged.connect(self._on_preset_changed)
 
-    # ----- Preset Logic -----------------------------------------------------
+    # =====================================================================
+    #  Provider Switch
+    # =====================================================================
 
     def _on_preset_changed(self, index):
-        if 0 <= index < len(PRESETS):
-            self.hint_label.setText(PRESETS[index]["hint"])
+        """Called when user switches provider. Saves current provider's state,
+        then loads the new provider's state (or defaults)."""
+        if self._switching_provider:
+            return
+        self._switching_provider = True
+        try:
+            self._apply_provider(index)
+        finally:
+            self._switching_provider = False
 
-    def _apply_preset(self):
-        index = self.preset_combo.currentIndex()
+    def _apply_provider(self, index):
+        """Apply provider preset at *index*: fill Base URL, models, and
+        restore per-provider saved config (API Key, model choice)."""
         if index < 0 or index >= len(PRESETS):
             return
+
         preset = PRESETS[index]
+
+        # Update hint
+        self.hint_label.setText(preset["hint"])
+
+        # Update Base URL
         if preset["api_base"]:
             self.api_base_edit.setText(preset["api_base"])
-        if preset["model"]:
-            self.model_edit.setText(preset["model"])
+        else:
+            self.api_base_edit.clear()
+
+        # Update placeholder
         self.api_key_edit.setPlaceholderText(preset["placeholder_key"])
+
+        # Populate model combo with preset models
+        self.model_combo.blockSignals(True)
+        self.model_combo.clear()
+        for m in preset.get("models", []):
+            self.model_combo.addItem(m)
+        # Always allow typing custom model names
+        self.model_combo.setEditable(True)
+        self.model_combo.blockSignals(False)
+
+        # Try to restore per-provider saved config
+        saved = self._load_provider_config(preset["name"])
+        if saved:
+            self.api_key_edit.setText(saved["api_key"])
+            self._set_model_text(saved["model"])
+            try:
+                self.max_tokens_spin.setValue(int(saved["max_tokens"]))
+            except (ValueError, TypeError):
+                self.max_tokens_spin.setValue(4096)
+        else:
+            # No saved config for this provider: use defaults, clear key
+            self.api_key_edit.clear()
+            self._set_model_text(preset.get("default_model", ""))
+            self.max_tokens_spin.setValue(4096)
+
+    def _set_model_text(self, model_name):
+        """Set the model combo to show *model_name*, selecting it from the list
+        if possible, otherwise putting it in the edit field."""
+        if not model_name:
+            self.model_combo.setCurrentIndex(0 if self.model_combo.count() > 0 else -1)
+            return
+        idx = self.model_combo.findText(model_name)
+        if idx >= 0:
+            self.model_combo.setCurrentIndex(idx)
+        else:
+            self.model_combo.setEditText(model_name)
+
+    def _current_model_text(self):
+        """Return the current model name from the editable combo."""
+        return self.model_combo.currentText().strip()
 
     def _toggle_key_visibility(self, checked):
         self.api_key_edit.setEchoMode(
             QtWidgets.QLineEdit.Normal if checked else QtWidgets.QLineEdit.Password
         )
 
-    # ----- Load / Save ------------------------------------------------------
+    # =====================================================================
+    #  Load / Save
+    # =====================================================================
 
     def _load_current(self):
+        """Load the active global config and auto-select provider."""
         cfg = config.load_config(force_reload=True)
         api_key = cfg.get("OPENAI_API_KEY", "")
         if api_key == "your_api_key_here":
             api_key = ""
-        self.api_key_edit.setText(api_key)
 
         api_base = cfg.get("OPENAI_API_BASE", "https://api.openai.com/v1")
-        self.api_base_edit.setText(api_base)
-
         model = cfg.get("OPENAI_MODEL", "gpt-4o")
-        self.model_edit.setText(model)
+        max_tokens = cfg.get("OPENAI_MAX_TOKENS", "4096")
 
-        self.max_tokens_spin.setValue(int(cfg.get("OPENAI_MAX_TOKENS", "4096")))
-
-        self._auto_select_preset(api_base)
-
-    def _auto_select_preset(self, api_base):
+        # Find matching provider
+        matched_idx = len(PRESETS) - 1  # default to Custom
         api_base_lower = api_base.lower().rstrip("/")
         for i, preset in enumerate(PRESETS):
             if preset["api_base"] and preset["api_base"].lower().rstrip("/") == api_base_lower:
-                self.preset_combo.setCurrentIndex(i)
-                return
-        self.preset_combo.setCurrentIndex(0)
+                matched_idx = i
+                break
+
+        # Apply provider (this will try to load per-provider saved data)
+        self._switching_provider = True
+        self.preset_combo.setCurrentIndex(matched_idx)
+        self._switching_provider = False
+
+        # Override with actual global values (these are the "current active" ones)
+        self.api_key_edit.setText(api_key)
+        self.api_base_edit.setText(api_base)
+
+        # Populate model combo for the matched preset
+        preset = PRESETS[matched_idx]
+        self.model_combo.blockSignals(True)
+        self.model_combo.clear()
+        for m in preset.get("models", []):
+            self.model_combo.addItem(m)
+        self.model_combo.setEditable(True)
+        self.model_combo.blockSignals(False)
+        self._set_model_text(model)
+
+        try:
+            self.max_tokens_spin.setValue(int(max_tokens))
+        except (ValueError, TypeError):
+            self.max_tokens_spin.setValue(4096)
+
+        # Update hint
+        self.hint_label.setText(preset["hint"])
 
     def reload_config(self):
         """Public method called when switching to the settings tab."""
@@ -448,7 +580,7 @@ class SettingsWidget(QtWidgets.QWidget):
     def _on_save(self):
         api_key = self.api_key_edit.text().strip()
         api_base = self.api_base_edit.text().strip()
-        model = self.model_edit.text().strip()
+        model = self._current_model_text()
         max_tokens = self.max_tokens_spin.value()
 
         if not api_base:
@@ -456,6 +588,7 @@ class SettingsWidget(QtWidgets.QWidget):
         if not model:
             model = "gpt-4o"
 
+        # Save global active config
         data = {
             "OPENAI_API_KEY": api_key,
             "OPENAI_API_BASE": api_base,
@@ -464,6 +597,11 @@ class SettingsWidget(QtWidgets.QWidget):
         }
         config.save_config(data)
 
+        # Also save per-provider config so it's remembered on switch
+        idx = self.preset_combo.currentIndex()
+        if 0 <= idx < len(PRESETS):
+            self._save_provider_config(PRESETS[idx]["name"], api_key, model, max_tokens)
+
         if not api_key:
             self._status_msg.setStyleSheet("color: #dcdcaa; font-size: 12px;")
             self._status_msg.setText("✓ 已保存（API Key 为空，对话前请填写）")
@@ -471,14 +609,17 @@ class SettingsWidget(QtWidgets.QWidget):
             self._status_msg.setStyleSheet("color: #4ec9b0; font-size: 12px;")
             self._status_msg.setText("✓ 已保存")
 
-        # Auto-clear status after 3s
         QtCore.QTimer.singleShot(3000, lambda: self._status_msg.setText(""))
+
+    # =====================================================================
+    #  Test Connection
+    # =====================================================================
 
     def _on_test_connection(self):
         """Test API connectivity with a minimal request."""
         api_key = self.api_key_edit.text().strip()
         api_base = self.api_base_edit.text().strip() or "https://api.openai.com/v1"
-        model = self.model_edit.text().strip() or "gpt-4o"
+        model = self._current_model_text() or "gpt-4o"
 
         if not api_key:
             self._status_msg.setStyleSheet("color: #f44747; font-size: 12px;")
@@ -487,7 +628,6 @@ class SettingsWidget(QtWidgets.QWidget):
 
         self._status_msg.setStyleSheet("color: #888888; font-size: 12px;")
         self._status_msg.setText("测试连接中...")
-        # Force UI repaint
         QtWidgets.QApplication.processEvents()
 
         url = api_base.rstrip("/") + "/chat/completions"
@@ -529,7 +669,9 @@ class SettingsWidget(QtWidgets.QWidget):
 
         QtCore.QTimer.singleShot(8000, lambda: self._status_msg.setText(""))
 
-    # ----- Token Usage (called externally by ChatWidget) --------------------
+    # =====================================================================
+    #  Token Usage (called externally by ChatWidget)
+    # =====================================================================
 
     def update_usage(self, prompt_tokens, completion_tokens, total_tokens, session_total):
         """Update the token usage display. Called by ChatWidget._on_usage."""
@@ -544,12 +686,10 @@ class SettingsWidget(QtWidgets.QWidget):
                 prompt_tokens, completion_tokens, total_tokens
             )
         )
-        # Update all-time total (persisted)
         self._alltime_tokens += total_tokens
         self._usage_alltime_label.setText(
             "历史总计: {} tokens".format(self._alltime_tokens)
         )
-        # Persist
         config.save_config({"ALLTIME_TOKENS": str(self._alltime_tokens)})
 
     def reset_usage(self):
@@ -557,4 +697,3 @@ class SettingsWidget(QtWidgets.QWidget):
         self._usage_current_label.setText("本次请求: —")
         self._usage_session_label.setText("本轮累计: 0")
         self._usage_detail_label.setText("Prompt: — | Completion: — | Total: —")
-        # Note: alltime total is NOT reset here — it's cumulative

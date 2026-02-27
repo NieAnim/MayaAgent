@@ -918,10 +918,29 @@ class ChatWidget(QtWidgets.QWidget):
 
         self._append_message("tool", "结果 [{}]: {}".format(func_name, msg))
 
+        # If the capture_viewport tool was used, show a preview thumbnail
+        if func_name == "capture_viewport":
+            self._show_viewport_preview()
+
         self._pending_tool_results[call_id] = (func_name, result_json)
 
         if all(tid in self._pending_tool_results for tid in self._expected_tool_ids):
             self._on_all_tools_done()
+
+    def _show_viewport_preview(self):
+        """Show a small preview of the captured viewport image in the chat."""
+        try:
+            from .tools.vision_tool import has_pending_image
+            if not has_pending_image():
+                return
+            # We don't consume the image here (get_pending_image clears it),
+            # just show a notice that the AI will see the viewport.
+            self._append_message(
+                "system",
+                "📸 视口画面已捕获，AI 将在下一轮对话中看到场景画面并进行分析。"
+            )
+        except (ImportError, Exception):
+            pass
 
     def _on_all_tools_done(self):
         for call_id in self._expected_tool_ids:
